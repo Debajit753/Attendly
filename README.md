@@ -1,10 +1,9 @@
 # Attendly
 
-A private, offline college **attendance tracker + bunk calculator** with one-tap, location-verified check-in. Everything stays on your phone — no account, no server, nothing uploaded.
+A offline college **attendance tracker + bunk calculator** with one-tap, location-verified check-in.
 
-Built with **Expo (React Native) + TypeScript**. Personal project.
+Built with **Expo (React Native) + TypeScript**.
 
-> The question it answers every morning: **"Am I safe to skip today?"**
 
 ---
 
@@ -16,13 +15,10 @@ Built with **Expo (React Native) + TypeScript**. Personal project.
 - **Glanceable analytics** — attendance ring with a 75% notch, cumulative trend, a GitHub-style month heatmap, worst-first subject bars, and streaks.
 - **Honest by design** — an end-of-day *catch-up* review so nothing is silently missed; `Present / Late / Absent / Cancelled / Holiday` states; per-subject targets; college rounding rule (round or truncate).
 - **Class reminders** and **background auto check-in** (both need a dev build).
-- **Offline & on-device** — data in AsyncStorage, plus manual **backup / restore** to a `.json` file.
+- **on-device** — data in AsyncStorage, plus manual **backup / restore** to a `.json` file.
 
 Full list → **[docs/features.md](docs/features.md)**
 
-## Screenshots
-
-_Add screenshots here._
 
 ## Tech stack
 
@@ -87,7 +83,6 @@ Details → **[docs/architecture.md](docs/architecture.md)**
 cd app && npm test
 ```
 
-Covers the attendance math (current %, must-attend, skip budget, end-of-term projection, rounding).
 
 ## License
 
