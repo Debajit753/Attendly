@@ -1,0 +1,13 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Attendly">
+  <defs>
+    <linearGradient id="ag" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#26C766"/>
+      <stop offset="1" stop-color="#15803D"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#ag)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="150" stroke-width="36" stroke-dasharray="812 130" transform="rotate(-64 256 256)" opacity="0.85"/>
+    <path d="M163 259 L218 316 L325 195" stroke-width="44"/>
+  </g>
+</svg>
