@@ -1,5 +1,6 @@
-import React from 'react';
-import Svg, { Circle, Line, Text as SvgText } from 'react-native-svg';
+import { View } from 'react-native';
+import Svg, { Circle, Line } from 'react-native-svg';
+import { Text } from './AppText';
 import { Palette } from '../theme';
 import { currentPct, statusOf, roundP, RoundingRule } from '../logic';
 
@@ -16,18 +17,25 @@ export function Ring({ a, h, target, size = 150, pal, rounding }: { a: number; h
   const nx1 = cx + ni * Math.cos(ang), ny1 = cy + ni * Math.sin(ang);
   const nx2 = cx + no * Math.cos(ang), ny2 = cy + no * Math.sin(ang);
   const label = h <= 0 ? '—' : `${roundP(p, rounding)}%`;
+  // The labels are normal Text centred over the SVG, not SvgText: on Android,
+  // react-native-svg mis-measures custom fonts for textAnchor="middle", pushing
+  // the text to the right.
   return (
-    <Svg width={size} height={size}>
-      <Circle cx={cx} cy={cy} r={r} fill="none" stroke={pal.surfaceAlt} strokeWidth={stroke} />
-      <Circle
-        cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth={stroke} strokeLinecap="round"
-        strokeDasharray={`${dash} ${circ}`} transform={`rotate(-90 ${cx} ${cy})`}
-      />
-      {/* soft halo so the tick is visible on any ring colour, then the tick itself */}
-      <Line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke={pal.surface} strokeWidth={6} strokeLinecap="round" />
-      <Line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke={pal.text} strokeWidth={3} strokeLinecap="round" />
-      <SvgText x={cx} y={cy} dy={5} fontSize={40} fontFamily="SFHeavy" fill={pal.text} textAnchor="middle">{label}</SvgText>
-      <SvgText x={cx} y={cy + 26} fontSize={12} fontFamily="SFSemibold" fill={pal.textMuted} textAnchor="middle">target {target}%</SvgText>
-    </Svg>
+    <View style={{ width: size, height: size }}>
+      <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
+        <Circle cx={cx} cy={cy} r={r} fill="none" stroke={pal.surfaceAlt} strokeWidth={stroke} />
+        <Circle
+          cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`} transform={`rotate(-90 ${cx} ${cy})`}
+        />
+        {/* soft halo so the tick is visible on any ring colour, then the tick itself */}
+        <Line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke={pal.surface} strokeWidth={6} strokeLinecap="round" />
+        <Line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke={pal.text} strokeWidth={3} strokeLinecap="round" />
+      </Svg>
+      <View pointerEvents="none" style={{ position: 'absolute', left: stroke, right: stroke, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: pal.text, fontSize: 38, fontWeight: '800', lineHeight: 44, textAlign: 'center', includeFontPadding: false }}>{label}</Text>
+        <Text numberOfLines={1} style={{ color: pal.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center', marginTop: 1, includeFontPadding: false }}>target {target}%</Text>
+      </View>
+    </View>
   );
 }

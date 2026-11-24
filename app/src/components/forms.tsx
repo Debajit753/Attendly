@@ -5,28 +5,32 @@ import { Ionicons } from '@expo/vector-icons';
 import { Palette, SUBJECT_COLORS } from '../theme';
 import { AppData, uid, materializeToday, parseISO, isoDate } from '../logic';
 import { Field, inputStyle, WEEK, niceDate, Stepper } from './ui';
-import { TimeField } from './TimePicker';
+import { TimeField, DatePicker } from './TimePicker';
 import { MapPicker } from './MapPicker';
+import { confirmAsync } from './confirm';
 
 /* Bottom-sheet forms: date row, subject + class editors. */
 export function DateRow({ pal, label, hint, value, onChange, last }: { pal: Palette; label: string; hint?: string; value?: string; onChange: (v: string | undefined) => void; last?: boolean }) {
-  const [text, setText] = React.useState(value ?? '');
-  React.useEffect(() => { setText(value ?? ''); }, [value]);
-  const isoRe = /^\d{4}-\d{2}-\d{2}$/;
-  const parsedOk = (t: string) => { if (!isoRe.test(t)) return false; const d = parseISO(t); return !isNaN(d.getTime()) && isoDate(d) === t; };
-  const valid = parsedOk(text);
-  const invalid = text.length > 0 && !valid;
-  const commit = (t: string) => { setText(t); if (t === '') onChange(undefined); else if (parsedOk(t)) onChange(t); };
+  const [open, setOpen] = React.useState(false);
+  const valid = !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && isoDate(parseISO(value)) === value;
   return (
     <View style={{ paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: last ? 0 : 0.5, borderBottomColor: pal.hair }}>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <View style={{ flex: 1, paddingRight: 10 }}>
           <Text style={{ color: pal.text, fontSize: 15 }}>{label}</Text>
-          <Text style={{ color: invalid ? pal.danger : pal.textMuted, fontSize: 12, marginTop: 2 }}>{valid ? niceDate(text) : invalid ? 'Use format YYYY-MM-DD' : (hint || 'YYYY-MM-DD')}</Text>
+          <Text style={{ color: pal.textMuted, fontSize: 12, marginTop: 2 }}>{hint || 'Tap to pick a date'}</Text>
         </View>
-        <TextInput value={text} onChangeText={commit} placeholder="2026-12-15" placeholderTextColor={pal.textMuted} autoCapitalize="none" autoCorrect={false}
-          style={{ color: pal.text, fontSize: 15, fontWeight: '600', backgroundColor: pal.surfaceAlt, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, width: 138, textAlign: 'center' }} />
+        <Pressable onPress={() => setOpen(true)} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: pal.surfaceAlt, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, opacity: pressed ? 0.6 : 1 })}>
+          <Ionicons name="calendar-outline" size={15} color={pal.brand} />
+          <Text style={{ color: valid ? pal.text : pal.textMuted, fontSize: 14, fontWeight: '600' }}>{valid ? niceDate(value!) : 'Set date'}</Text>
+        </Pressable>
+        {valid && (
+          <Pressable onPress={() => onChange(undefined)} hitSlop={8} style={({ pressed }) => ({ marginLeft: 8, opacity: pressed ? 0.5 : 1 })}>
+            <Ionicons name="close-circle" size={18} color={pal.textMuted} />
+          </Pressable>
+        )}
       </View>
+      {open && <DatePicker pal={pal} value={value} title={label} onClose={() => setOpen(false)} onSave={(v) => { onChange(v); setOpen(false); }} />}
     </View>
   );
 }
@@ -60,12 +64,19 @@ export function SubjectForm({ pal, data, setData, editing, onClose }: any) {
     setData((d: AppData | null) => {
       if (!d) return d;
       if (editing) return { ...d, subjects: d.subjects.map(s => (s.id === editing.id ? { ...s, name: clean, color, target } : s)) };
-      if (d.subjects.some(s => s.name.trim().toLowerCase() === clean.toLowerCase())) return d; // no duplicate name
-      return { ...d, subjects: [...d.subjects, { id: uid(), name: clean, color, active: true, target }] };
+      // New subjects belong to the term being viewed; names only need to be unique within it.
+      const termId = data.activeTermId;
+      if (d.subjects.some(s => s.termId === termId && s.name.trim().toLowerCase() === clean.toLowerCase())) return d;
+      return { ...d, subjects: [...d.subjects, { id: uid(), name: clean, color, active: true, target, termId }] };
     });
     onClose();
   };
-  const del = () => {
+  const del = async () => {
+    const nSlots = data.slots.filter((s: any) => s.subjectId === editing.id).length;
+    const nRecs = data.records.filter((r: any) => r.subjectId === editing.id && r.status !== 'pending').length;
+    const ok = await confirmAsync(`Delete ${editing.name}?`,
+      `This removes the subject, ${nSlots} ${nSlots === 1 ? 'class' : 'classes'} from your timetable and ${nRecs} attendance ${nRecs === 1 ? 'record' : 'records'}. This can't be undone.`, 'Delete');
+    if (!ok) return;
     setData((d: AppData | null) => (d ? { ...d, subjects: d.subjects.filter(s => s.id !== editing.id), slots: d.slots.filter(s => s.subjectId !== editing.id), records: d.records.filter(r => r.subjectId !== editing.id) } : d));
     onClose();
   };
@@ -115,8 +126,12 @@ export function SlotForm({ pal, data, setData, editing, defaultDay, onClose }: a
     });
     onClose();
   };
-  const del = () => {
-    setData((d: AppData | null) => (d ? { ...d, slots: d.slots.filter(s => s.id !== editing.id), records: d.records.filter(r => r.slotId !== editing.id) } : d));
+  // Removing a class from the timetable keeps the attendance already marked for it
+  // (it still counts for the subject); only its unmarked "pending" entries go.
+  const del = async () => {
+    const ok = await confirmAsync('Remove this class from your timetable?', 'Attendance you have already marked for it is kept and still counts.', 'Remove');
+    if (!ok) return;
+    setData((d: AppData | null) => (d ? { ...d, slots: d.slots.filter(s => s.id !== editing.id), records: d.records.filter(r => !(r.slotId === editing.id && r.status === 'pending')) } : d));
     onClose();
   };
   return (

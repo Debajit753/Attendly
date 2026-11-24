@@ -30,12 +30,12 @@ const R_TITLES: ((s: string, lead: number) => string)[] = [
   (s) => `Don't bunk ${s} 😄`,
 ];
 const R_BODIES: ((s: string, room: string, start: string) => string)[] = [
-  (s, room, start) => `Head over${room ? ' to ' + room : ''} — starts ${start}. Tap to check in.`,
-  (s, room, start) => `Starts ${start}. A quick check-in keeps your % healthy.`,
-  (s, room, start) => `${room ? room + ' · ' : ''}${start}. Every class counts — don't skip this one.`,
-  (s, room, start) => `Almost ${s} time. Show up and keep your streak alive.`,
-  (s, room, start) => `You've got this — get there and tap Check in.`,
-  (s, room, start) => `${start}${room ? ' at ' + room : ''}. Future-you will thank you.`,
+  (_s, room, start) => `Head over${room ? ' to ' + room : ''} — starts ${start}. Tap to check in.`,
+  (_s, _room, start) => `Starts ${start}. A quick check-in keeps your % healthy.`,
+  (_s, room, start) => `${room ? room + ' · ' : ''}${start}. Every class counts — don't skip this one.`,
+  (s, _room, _start) => `Almost ${s} time. Show up and keep your streak alive.`,
+  (_s, _room, _start) => `You've got this — get there and tap Check in.`,
+  (_s, room, start) => `${start}${room ? ' at ' + room : ''}. Future-you will thank you.`,
 ];
 function reminderCopy(sub: string, room: string, start: string, lead: number, idx: number) {
   return {

@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { View, Pressable, Animated, PanResponder, Modal, Platform, ActivityIndicator } from 'react-native';
+import { View, Pressable, Animated, PanResponder, Modal, ActivityIndicator } from 'react-native';
 import { Text } from '../components/AppText';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { Palette } from '../theme';
-import { AppData, Rec, Status, haversine, currentPct, maxBunksNow, statusOf, streaks, niceToday, overallCounts, subjectStats, TODAY, classesToReach, unmarkedPast, roundP } from '../logic';
+import { Rec, Status, Streak, haversine, maxBunksNow, statusOf, streaks, niceToday, overallCounts, subjectStats, TODAY, classesToReach, unmarkedPast } from '../logic';
 import { Ring } from '../components/Ring';
 import { Card, SectLabel, Title, Sub, Chip, SubjectBar, animate, niceDate } from '../components/ui';
+import { SubjectPicker } from '../components/DaySheet';
+import { FlameIcon } from '../components/FlameIcon';
 
-export function Today({ pal, data, mark, goStats, goTime }: any) {
+export function Today({ pal, data, mark, setSubject, goTime }: any) {
   const t = overallCounts(data);
   const T = data.settings.target;
   const zone = statusOf(t.a, t.h, T);
@@ -16,7 +17,7 @@ export function Today({ pal, data, mark, goStats, goTime }: any) {
   const stats = subjectStats(data);
   const activeSubIds = new Set(data.subjects.filter((s: any) => s.active).map((s: any) => s.id));
   const todays: Rec[] = data.records.filter((r: Rec) => r.date === TODAY && activeSubIds.has(r.subjectId)).sort((a: Rec, b: Rec) => a.scheduledStart.localeCompare(b.scheduledStart));
-  const { current, best } = streaks(data);
+  const streak = streaks(data);
 
   let vBg = pal.brandSubtle, vFg = pal.text, vIcon: keyof typeof Ionicons.glyphMap = 'leaf', vTitle = 'Building your record', vSub = 'Mark a few more classes and your real numbers appear.';
   if (t.h >= 6) {
@@ -30,7 +31,7 @@ export function Today({ pal, data, mark, goStats, goTime }: any) {
       <Title pal={pal}>Today</Title>
       <Sub pal={pal}>{niceToday()} · {todays.length} {todays.length === 1 ? 'class' : 'classes'}</Sub>
 
-      <CatchUpCard pal={pal} data={data} mark={mark} />
+      <CatchUpCard pal={pal} data={data} mark={mark} setSubject={setSubject} />
 
       <View style={{ flexDirection: 'row', gap: 12, backgroundColor: vBg, borderRadius: 14, padding: 16, marginBottom: 14 }}>
         <Ionicons name={vIcon} size={22} color={vFg} />
@@ -53,20 +54,14 @@ export function Today({ pal, data, mark, goStats, goTime }: any) {
       </Card>
 
       {t.h >= 6 && (
-        <Card pal={pal} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Ionicons name="flame" size={24} color={current > 0 ? pal.warn : pal.textMuted} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15 }}>{current > 0 ? `${current} ${current === 1 ? 'class' : 'classes'} in a row` : 'Start a new streak'}</Text>
-            <Text style={{ color: pal.textSecondary, fontSize: 12.5 }}>{current > 0 ? `You're someone who shows up. Best: ${best}` : `Check in to your next class to begin. Best: ${best}`}</Text>
-          </View>
-        </Card>
+        <StreakCard pal={pal} s={streak} />
       )}
 
       <SectLabel pal={pal}>Today's classes</SectLabel>
       <Card pal={pal} style={{ paddingVertical: 4 }}>
         {todays.length === 0 ? (
           <Text style={{ color: pal.textSecondary, textAlign: 'center', paddingVertical: 14, fontWeight: '500' }}>No classes today — enjoy the break.</Text>
-        ) : todays.map((r, i) => <ClassRow key={r.id} pal={pal} data={data} r={r} mark={mark} last={i === todays.length - 1} />)}
+        ) : todays.map((r, i) => <ClassRow key={r.id} pal={pal} data={data} r={r} mark={mark} setSubject={setSubject} last={i === todays.length - 1} />)}
       </Card>
 
       <View style={{ height: 18 }} />
@@ -77,9 +72,34 @@ export function Today({ pal, data, mark, goStats, goTime }: any) {
   );
 }
 
-function CatchUpCard({ pal, data, mark }: any) {
+/** Continuous class streak: gradient flame when lit, and a plain sentence. */
+function StreakCard({ pal, s }: { pal: any; s: Streak }) {
+  const lit = s.current > 0;
+  const plural = (n: number) => `${n} ${n === 1 ? 'class' : 'classes'}`;
+  const title = s.paused ? 'Streak paused'
+    : lit ? `${plural(s.current)} in a row`
+    : 'Start a new streak';
+  const sub = s.paused
+    ? `${s.pausedAt ? `You were on ${s.pausedAt}. ` : ''}Mark ${plural(s.paused)} you missed above to continue.`
+    : lit ? (s.current >= s.best ? `Your best run yet. Keep it going at your next class.` : `Best: ${s.best}. Keep it going at your next class.`)
+    : `Check in to your next class to begin.${s.best ? ` Best: ${s.best}` : ''}`;
+  return (
+    <Card pal={pal}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        {lit ? <FlameIcon size={28} /> : <Ionicons name="flame-outline" size={26} color={pal.textMuted} />}
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15 }}>{title}</Text>
+          <Text style={{ color: pal.textSecondary, fontSize: 12.5, marginTop: 1 }}>{sub}</Text>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function CatchUpCard({ pal, data, mark, setSubject }: any) {
   const items: Rec[] = unmarkedPast(data);
   const [open, setOpen] = useState(false);
+  const [swap, setSwap] = useState<Rec | null>(null);
   if (items.length === 0) return null;
   const chip = (bg: string, fg: string, icon: any, onPress: () => void) => (
     <Pressable onPress={onPress} hitSlop={6} style={({ pressed }) => ({ width: 34, height: 34, borderRadius: 17, backgroundColor: bg, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
@@ -109,22 +129,26 @@ function CatchUpCard({ pal, data, mark }: any) {
                 {chip(pal.safeBg, pal.safeText, 'checkmark', () => mark(r.id, 'present'))}
                 {chip(pal.dangerBg, pal.dangerText, 'close', () => mark(r.id, 'absent'))}
                 {chip(pal.neutralBg, pal.neutralText, 'remove', () => mark(r.id, 'cancelled'))}
+                {chip(pal.surfaceAlt, pal.brand, 'swap-horizontal', () => setSwap(r))}
               </View>
             );
           })}
           {items.length > 30 && <Text style={{ color: pal.warnText, fontSize: 12, textAlign: 'center' }}>+{items.length - 30} more — mark the ones above first.</Text>}
         </View>
       )}
+      {swap && <SubjectPicker pal={pal} data={data} rec={swap} onClose={() => setSwap(null)} onPick={(id: string) => { setSubject(swap.id, id); setSwap(null); }} />}
     </View>
   );
 }
 
-export function ClassRow({ pal, data, r, mark, last }: any) {
+export function ClassRow({ pal, data, r, mark, setSubject, last }: any) {
   const sub = data.subjects.find((s: any) => s.id === r.subjectId);
   const slot = data.slots.find((s: any) => s.id === r.slotId);
   const [menu, setMenu] = useState(false);
   const [checking, setChecking] = useState(false);
   const [ckPrompt, setCkPrompt] = useState<any>(null);
+  const [swap, setSwap] = useState(false);
+  const plannedName = r.plannedSubjectId && r.plannedSubjectId !== r.subjectId ? (data.subjects.find((s: any) => s.id === r.plannedSubjectId)?.name ?? 'a deleted subject') : null;
   async function doCheckIn() {
     if (!slot || slot.lat == null) { setCkPrompt({ kind: 'noloc' }); return; }
     setChecking(true);
@@ -193,12 +217,13 @@ export function ClassRow({ pal, data, r, mark, last }: any) {
         <Text style={{ color: pal.textSecondary, fontWeight: '600', fontSize: 13, width: 48 }}>{r.scheduledStart}</Text>
         <View style={{ flex: 1 }}>
           <Text style={{ color: pal.text, fontWeight: '600', fontSize: 15 }} numberOfLines={1}>{sub?.name ?? 'Class'}</Text>
-          <Text style={{ color: pal.textMuted, fontSize: 12.5 }} numberOfLines={1}>{slot?.room || 'No room'}</Text>
+          <Text style={{ color: pal.textMuted, fontSize: 12.5 }} numberOfLines={1}>{plannedName ? `Instead of ${plannedName}` : (slot?.room || 'No room')}</Text>
         </View>
         {right}
         <Pressable onPress={() => setMenu(true)} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1, paddingHorizontal: 2 })}><Ionicons name="ellipsis-horizontal" size={18} color={pal.textMuted} /></Pressable>
       </Animated.View>
-      {menu && <RowMenu pal={pal} name={sub?.name} onPick={(st: Status) => { setMenu(false); mark(r.id, st); }} onClose={() => setMenu(false)} />}
+      {menu && <RowMenu pal={pal} name={sub?.name} onSwap={() => { setMenu(false); setSwap(true); }} onPick={(st: Status) => { setMenu(false); mark(r.id, st); }} onClose={() => setMenu(false)} />}
+      {swap && <SubjectPicker pal={pal} data={data} rec={r} onClose={() => setSwap(false)} onPick={(id: string) => { setSubject(r.id, id); setSwap(false); }} />}
       {ckPrompt && <CheckinPrompt pal={pal} prompt={ckPrompt} onPick={(st: Status) => { setCkPrompt(null); mark(r.id, st); }} onClose={() => setCkPrompt(null)} />}
     </View>
   );
@@ -223,7 +248,7 @@ export function CheckinPrompt({ pal, prompt, onPick, onClose }: any) {
     </Modal>
   );
 }
-export function RowMenu({ pal, name, onPick, onClose }: any) {
+export function RowMenu({ pal, name, onPick, onSwap, onClose }: any) {
   const opt = (icon: any, color: string, label: string, note: string | null, st: Status) => (
     <Pressable onPress={() => onPick(st)} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: pal.hair, opacity: pressed ? 0.5 : 1 })}>
       <Ionicons name={icon} size={20} color={color} />
@@ -245,6 +270,15 @@ export function RowMenu({ pal, name, onPick, onClose }: any) {
         {opt('remove-circle', pal.neutral, 'No class held', "Cancelled — doesn't count toward your %", 'cancelled')}
         {opt('sunny', pal.neutral, 'Holiday / day off', "Doesn't count toward your %", 'holiday')}
         {opt('refresh', pal.textSecondary, 'Clear', null, 'pending')}
+        {onSwap && (
+          <Pressable onPress={onSwap} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, opacity: pressed ? 0.5 : 1 })}>
+            <Ionicons name="swap-horizontal" size={20} color={pal.brand} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: pal.text, fontSize: 15, fontWeight: '500' }}>Change subject</Text>
+              <Text style={{ color: pal.textMuted, fontSize: 12, marginTop: 1 }}>Another class ran in this slot. The timetabled one stays frozen.</Text>
+            </View>
+          </Pressable>
+        )}
       </View>
     </Modal>
   );

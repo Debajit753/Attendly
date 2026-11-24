@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { View, Pressable, Modal } from 'react-native';
 import { Text } from '../components/AppText';
 import { Ionicons } from '@expo/vector-icons';
@@ -67,7 +67,7 @@ export function Timetable({ pal, data, setData }: { pal: Palette; data: AppData;
       )}
 
       <SectLabel pal={pal}>Calendar</SectLabel>
-      <Card pal={pal}><CalendarHeatmap pal={pal} data={data} /></Card>
+      <Card pal={pal}><CalendarHeatmap pal={pal} data={data} setData={setData} /></Card>
 
       {modal?.kind === 'subject' && <SubjectForm pal={pal} data={data} setData={setData} editing={modal.item} onClose={() => setModal(null)} />}
       {modal?.kind === 'slot' && <SlotForm pal={pal} data={data} setData={setData} editing={modal.item} defaultDay={day} onClose={() => setModal(null)} />}

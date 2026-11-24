@@ -1,0 +1,54 @@
+rules_version = '2';
+
+// Attendly cloud sync. Deny by default: only the owner of users/{uid}, signed in with a
+// verified email, may read or write, and only documents with the exact expected shape.
+// Data layout (see docs/firebase-architecture.md):
+//   users/{uid}/data/core          subjects, slots, settings, terms, schemaVersion, updatedAt, deviceId
+//   users/{uid}/months/{YYYY-MM}   records, updatedAt, deviceId
+// Tested by app/rules-tests/rules.test.ts against the Firestore emulator (CI).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function owner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email_verified == true;
+    }
+
+    // Every write carries the server's clock (serverTimestamp) and a short device id,
+    // so a phone with a wrong or forged date can't win a sync.
+    function stamped(d) {
+      return d.updatedAt == request.time
+        && d.deviceId is string && d.deviceId.size() > 0 && d.deviceId.size() <= 64;
+    }
+
+    match /users/{uid}/data/core {
+      allow read, delete: if owner(uid);
+      allow create, update: if owner(uid)
+        && stamped(request.resource.data)
+        && request.resource.data.keys().hasOnly(['subjects', 'slots', 'settings', 'terms', 'schemaVersion', 'updatedAt', 'deviceId'])
+        && request.resource.data.keys().hasAll(['subjects', 'slots', 'settings', 'terms', 'schemaVersion', 'updatedAt', 'deviceId'])
+        && request.resource.data.subjects is list && request.resource.data.subjects.size() <= 100
+        && request.resource.data.slots is list && request.resource.data.slots.size() <= 300
+        && request.resource.data.settings is map
+        && request.resource.data.terms is list && request.resource.data.terms.size() <= 50
+        && request.resource.data.schemaVersion is int;
+    }
+
+    match /users/{uid}/months/{ym} {
+      allow read, delete: if owner(uid);
+      allow create, update: if owner(uid)
+        && ym.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && stamped(request.resource.data)
+        && request.resource.data.keys().hasOnly(['records', 'updatedAt', 'deviceId'])
+        && request.resource.data.keys().hasAll(['records', 'updatedAt', 'deviceId'])
+        && request.resource.data.records is list
+        && request.resource.data.records.size() <= 2000;
+    }
+
+    // Everything else, including listing other users, is refused.
+    match /{everything=**} {
+      allow read, write: if false;
+    }
+  }
+}

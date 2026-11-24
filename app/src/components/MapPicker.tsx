@@ -1,11 +1,21 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Text, Pressable, Modal, Platform } from 'react-native';
-import { WebView } from 'react-native-webview';
+import { WebView, WebViewMessageEvent } from 'react-native-webview';
+
+// react-native-webview 14 defaults its props generic to `undefined`, which React 19.3's
+// types collapse to `never`. Pin it to {} (types only; same component at runtime).
+const MapWebView = WebView<{}>;
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Palette } from '../theme';
 
-const html = (lat: number, lng: number, radius: number) => `<!DOCTYPE html><html><head>
+// Only finite numbers are ever written into the page's script, never stored strings,
+// so a tampered backup or cloud copy can't inject code into the map.
+const safeNum = (v: unknown, min: number, max: number, fallback: number) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : fallback;
+const html = (lat0: number, lng0: number, radius0: number) => {
+  const lat = safeNum(lat0, -90, 90, 20.5937), lng = safeNum(lng0, -180, 180, 78.9629), radius = safeNum(radius0, 10, 5000, 100);
+  return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
@@ -31,6 +41,7 @@ const html = (lat: number, lng: number, radius: number) => `<!DOCTYPE html><html
     update();
   } catch(err){ post({error:String(err)}); }
 </script></body></html>`;
+};
 
 export function MapPicker({ pal, initial, onSave, onClose }: {
   pal: Palette;
@@ -38,7 +49,7 @@ export function MapPicker({ pal, initial, onSave, onClose }: {
   onClose: () => void;
   onSave: (loc: { lat: number; lng: number; radius: number }) => void;
 }) {
-  const webRef = useRef<WebView>(null);
+  const webRef = useRef<WebView<{}>>(null);
   const start = { lat: initial.lat ?? 20.5937, lng: initial.lng ?? 78.9629 }; // fallback: India centre
   const [coords, setCoords] = useState({ lat: start.lat, lng: start.lng });
   const [radius, setRadius] = useState(initial.radius || 100);
@@ -50,10 +61,10 @@ export function MapPicker({ pal, initial, onSave, onClose }: {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const la = pos.coords.latitude, ln = pos.coords.longitude;
       setCoords({ lat: la, lng: ln });
-      webRef.current?.injectJavaScript(`window.recenter(${la},${ln}); true;`);
+      if (Number.isFinite(la) && Number.isFinite(ln)) webRef.current?.injectJavaScript(`window.recenter(${la},${ln}); true;`);
     } catch { /* ignore */ }
   }
-  function changeRadius(r: number) { setRadius(r); webRef.current?.injectJavaScript(`window.setRadius(${r}); true;`); }
+  function changeRadius(r: number) { setRadius(r); webRef.current?.injectJavaScript(`window.setRadius(${safeNum(r, 10, 5000, 100)}); true;`); }
 
   const shadow = { shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4 } as const;
 
@@ -73,11 +84,11 @@ export function MapPicker({ pal, initial, onSave, onClose }: {
               <Text style={{ color: pal.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center', lineHeight: 19 }}>Tap the ◎ button below to use your current location, then Save.{'\n'}Selected: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</Text>
             </View>
           ) : (
-            <WebView
+            <MapWebView
               ref={webRef}
               originWhitelist={['*']}
               source={{ html: html(start.lat, start.lng, radius) }}
-              onMessage={(e) => { try { const d = JSON.parse(e.nativeEvent.data); if (d.lat) setCoords({ lat: d.lat, lng: d.lng }); } catch { /* */ } }}
+              onMessage={(e: WebViewMessageEvent) => { try { const d = JSON.parse(e.nativeEvent.data); if (d.lat) setCoords({ lat: d.lat, lng: d.lng }); } catch { /* */ } }}
               style={{ flex: 1, backgroundColor: pal.surfaceAlt }}
             />
           )}
