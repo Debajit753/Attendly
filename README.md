@@ -1,10 +1,8 @@
 # Attendly
 
-A private college **attendance tracker and bunk calculator** with one-tap, location-verified check-in. It works fully offline on your phone. An optional account (Firebase) keeps a cloud copy so you can move to a new phone.
+An offline college **attendance tracker and bunk calculator** with one-tap, location-verified check-in. An optional account (Firebase) keeps a cloud copy so you can move to a new phone.
 
-Built with **Expo (React Native) + TypeScript**. Personal project.
-
-> The question it answers every morning: **"Am I safe to skip today?"**
+Built with **Expo (React Native) + TypeScript**.
 
 ---
 
@@ -22,10 +20,6 @@ Built with **Expo (React Native) + TypeScript**. Personal project.
 - **Class reminders** and **background auto check-in** (dev or release build).
 
 Full list: **[docs/features.md](docs/features.md)**
-
-## Screenshots
-
-_Add screenshots here._
 
 ## Tech stack
 
