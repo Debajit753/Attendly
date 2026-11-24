@@ -8,7 +8,7 @@
 
 | Tool | Version | Why |
 |---|---|---|
-| **Node.js** | 22.13 or newer (required by Expo SDK 58) | runtime for Metro and the tooling |
+| **Node.js** | 24.12 or newer (Firebase needs >= 24.12; Expo SDK 58 accepts 24) | runtime for Metro and the tooling |
 | **npm** | bundled with Node | installs dependencies |
 | **Expo SDK** | 58 | read the matching docs at <https://docs.expo.dev/versions/v58.0.0/> before changing native code |
 | **eas-cli** | latest, via `npx eas-cli` | cloud builds (dev / preview APKs) |
