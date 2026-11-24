@@ -1,10 +1,13 @@
 import React from 'react';
 import { View, ScrollView, Pressable } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Polyline, Polygon, Circle, Text as SvgText } from 'react-native-svg';
 import { Palette } from '../theme';
-import { AppData, Rec, currentPct, isoDate, parseISO, TODAY } from '../logic';
+import { AppData, Rec, DayKind, currentPct, dayKind, isoDate, parseISO, TODAY } from '../logic';
+import type { SetData } from './ui';
+import { DaySheet } from './DaySheet';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -98,7 +101,7 @@ export function Heatmap({ pal, data, months }: { pal: Palette; data: AppData; mo
     return pal.warn;
   };
   const size = 13, gap = 3, cell = size + gap, LEFTW = 28;
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<ScrollViewInstance>(null);
   // A month label sits above the first week-column that falls in a new month (GitHub-style).
   const monthOf = (col: string[]) => parseISO(col[0]).getMonth();
   const monthLabels = cols.map((col, ci) => (ci === 0 || monthOf(col) !== monthOf(cols[ci - 1]) ? MONTHS[monthOf(col)].slice(0, 3) : ''));
@@ -157,63 +160,81 @@ function LegendDot({ pal, color, label }: { pal: Palette; color: string; label: 
 }
 
 /* A real month calendar where each day is heat-mapped by attendance status. */
-export function CalendarHeatmap({ pal, data }: { pal: Palette; data: AppData }) {
+/* Month calendar. Each week is its own row of 7 flex cells, so dates always line up
+   under the right weekday (percentage widths wrapped after 6 cells on Android).
+   Tap a date to open that day's classes. */
+export function CalendarHeatmap({ pal, data, setData }: { pal: Palette; data: AppData; setData?: SetData }) {
   const [off, setOff] = React.useState(0);
+  const [openDay, setOpenDay] = React.useState<string | null>(null);
   const today = parseISO(TODAY);
   const view = new Date(today.getFullYear(), today.getMonth() + off, 1);
   const year = view.getFullYear(), month = view.getMonth();
   const firstDow = (new Date(year, month, 1).getDay() + 6) % 7; // Monday = 0
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const isoOf = (d: number) => `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
   const byDate: Record<string, Rec[]> = {};
   for (const r of data.records) (byDate[r.date] = byDate[r.date] || []).push(r);
 
-  const dayInfo = (d: number) => {
-    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const recs = byDate[iso] || [];
-    const present = recs.filter(r => r.status === 'present').length;
-    const absent = recs.filter(r => r.status === 'absent').length;
-    const held = present + absent;
-    let bg = 'transparent';
-    if (held > 0) bg = absent === 0 ? pal.safe : present === 0 ? pal.danger : pal.warn;
-    return { bg, isToday: iso === TODAY };
-  };
-
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7) cells.push(null);
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   const WD = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  const style = (kind: DayKind) => {
+    switch (kind) {
+      case 'present': return { bg: pal.safe, fg: '#fff', ring: undefined };
+      case 'absent': return { bg: pal.danger, fg: '#fff', ring: undefined };
+      case 'partial': return { bg: pal.warn, fg: '#fff', ring: undefined };
+      case 'off': return { bg: pal.neutralBg, fg: pal.neutralText, ring: undefined };
+      case 'pending': return { bg: pal.surfaceAlt, fg: pal.textSecondary, ring: pal.warn };
+      default: return { bg: pal.surfaceAlt, fg: pal.textSecondary, ring: undefined };
+    }
+  };
 
   return (
     <View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <Pressable onPress={() => setOff(off - 1)} hitSlop={12}><Ionicons name="chevron-back" size={20} color={pal.brand} /></Pressable>
-        <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15 }}>{MONTHS[month]} {year}</Text>
-        <Pressable onPress={() => setOff(Math.min(0, off + 1))} hitSlop={12} disabled={off >= 0}><Ionicons name="chevron-forward" size={20} color={off >= 0 ? pal.textMuted : pal.brand} /></Pressable>
+        <Pressable onPress={() => setOff(off - 1)} hitSlop={12} accessibilityLabel="Previous month"><Ionicons name="chevron-back" size={20} color={pal.brand} /></Pressable>
+        <Pressable onPress={() => setOff(0)} disabled={off === 0} style={{ alignItems: 'center' }}>
+          <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15 }}>{MONTHS[month]} {year}</Text>
+          {off !== 0 && <Text style={{ color: pal.brand, fontSize: 11.5, fontWeight: '600', marginTop: 1 }}>Back to today</Text>}
+        </Pressable>
+        <Pressable onPress={() => setOff(off + 1)} hitSlop={12} accessibilityLabel="Next month"><Ionicons name="chevron-forward" size={20} color={pal.brand} /></Pressable>
       </View>
       <View style={{ flexDirection: 'row' }}>
         {WD.map((w, i) => <Text key={i} style={{ flex: 1, textAlign: 'center', color: pal.textMuted, fontSize: 11, fontWeight: '600', marginBottom: 6 }}>{w}</Text>)}
       </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-        {cells.map((d, i) => {
-          if (d === null) return <View key={i} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} />;
-          const info = dayInfo(d);
-          const colored = info.bg !== 'transparent';
-          return (
-            <View key={i} style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 2.5 }}>
-              <View style={{ flex: 1, borderRadius: 8, backgroundColor: colored ? info.bg : pal.surfaceAlt, alignItems: 'center', justifyContent: 'center', borderWidth: info.isToday ? 2 : 0, borderColor: pal.brand }}>
-                <Text style={{ color: colored ? '#fff' : pal.textSecondary, fontSize: 13, fontWeight: info.isToday ? '800' : '500' }}>{d}</Text>
-              </View>
-            </View>
-          );
-        })}
-      </View>
-      <View style={{ flexDirection: 'row', gap: 14, marginTop: 14, flexWrap: 'wrap' }}>
+      {weeks.map((wk, wi) => (
+        <View key={wi} style={{ flexDirection: 'row' }}>
+          {wk.map((d, i) => {
+            if (d === null) return <View key={i} style={{ flex: 1, aspectRatio: 1 }} />;
+            const iso = isoOf(d);
+            const st = style(dayKind(byDate[iso] || []));
+            const isToday = iso === TODAY;
+            return (
+              <Pressable key={i} onPress={() => setOpenDay(iso)} disabled={!setData} style={({ pressed }) => ({ flex: 1, aspectRatio: 1, padding: 2.5, opacity: pressed ? 0.6 : 1 })}
+                accessibilityLabel={`${d} ${MONTHS[month]}`}>
+                <View style={{ flex: 1, borderRadius: 8, backgroundColor: st.bg, alignItems: 'center', justifyContent: 'center', borderWidth: isToday || st.ring ? 2 : 0, borderColor: isToday ? pal.brand : st.ring }}>
+                  <Text style={{ color: st.fg, fontSize: 13, fontWeight: isToday ? '800' : '500' }}>{d}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+      <View style={{ flexDirection: 'row', columnGap: 14, rowGap: 6, marginTop: 14, flexWrap: 'wrap' }}>
         <LegendDot pal={pal} color={pal.safe} label="Present" />
         <LegendDot pal={pal} color={pal.danger} label="Absent" />
         <LegendDot pal={pal} color={pal.warn} label="Partial" />
+        <LegendDot pal={pal} color={pal.neutralBg} label="Holiday / not held" />
         <LegendDot pal={pal} color={pal.surfaceAlt} label="No class" />
       </View>
+      {setData && <Text style={{ color: pal.textMuted, fontSize: 11.5, marginTop: 10 }}>Tap a date to mark or change that day's classes.</Text>}
+      {openDay && setData && <DaySheet pal={pal} data={data} setData={setData} iso={openDay} onClose={() => setOpenDay(null)} />}
     </View>
   );
 }

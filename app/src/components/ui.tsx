@@ -1,4 +1,3 @@
-import React from 'react';
 import { View, Pressable, LayoutAnimation } from 'react-native';
 import { Text } from './AppText';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,20 +38,22 @@ export function SubjectBar({ pal, x, target, rounding }: { pal: Palette; x: any;
   const fill = x.zone === 'danger' ? pal.danger : x.zone === 'warn' ? pal.warn : x.zone === 'building' ? pal.neutral : pal.safe;
   const recover = x.zone === 'danger' && x.h >= 6 ? ` · attend ${classesToReach(x.a, x.h, target) ?? '—'} to recover` : '';
   return (
-    <View style={{ marginBottom: 15 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: x.s.color }} />
-          <Text style={{ color: pal.text, fontWeight: '600', fontSize: 15 }} numberOfLines={1}>{x.s.name}</Text>
-          <Chip pal={pal} zone={x.zone} />
-        </View>
-        <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15 }}>{x.h ? `${roundP(x.pct, rounding)}%` : '—'}</Text>
+    <View style={{ marginBottom: 16 }}>
+      {/* Name gets the full width (wraps to 2 lines); the % never shrinks; the status chip
+          sits under the bar so long subject names can't collide with it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 7 }}>
+        <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: x.s.color, marginTop: 6 }} />
+        <Text style={{ color: pal.text, fontWeight: '600', fontSize: 15, lineHeight: 20, flex: 1, flexShrink: 1 }} numberOfLines={2}>{x.s.name}</Text>
+        <Text style={{ color: pal.text, fontWeight: '700', fontSize: 15, lineHeight: 20, flexShrink: 0 }}>{x.h ? `${roundP(x.pct, rounding)}%` : '—'}</Text>
       </View>
       <View style={{ height: 10, backgroundColor: pal.surfaceAlt, borderRadius: 999, justifyContent: 'center' }}>
         <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(x.pct, 100)}%`, backgroundColor: fill, borderRadius: 999 }} />
         <View style={{ position: 'absolute', left: `${target}%`, top: -3, bottom: -3, width: 2, backgroundColor: pal.text, opacity: 0.3, borderRadius: 2 }} />
       </View>
-      <Text style={{ color: pal.textMuted, fontSize: 11.5, fontWeight: '500', marginTop: 6 }}>{x.a}/{x.h} classes{recover}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 7 }}>
+        <Chip pal={pal} zone={x.zone} />
+        <Text style={{ color: pal.textMuted, fontSize: 11.5, fontWeight: '500', flexShrink: 1 }}>{x.a}/{x.h} classes{recover}</Text>
+      </View>
     </View>
   );
 }

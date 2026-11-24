@@ -1,8 +1,5 @@
-import React from 'react';
 import { View } from 'react-native';
-import { Text } from '../components/AppText';
-import { Palette } from '../theme';
-import { AppData, subjectStats } from '../logic';
+import { subjectStats } from '../logic';
 import { Trend, Heatmap } from '../components/Charts';
 import { Card, SectLabel, Title, Sub, SubjectBar } from '../components/ui';
 

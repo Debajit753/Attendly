@@ -3,24 +3,33 @@ import { SUBJECT_COLORS } from './theme';
 export type Status = 'present' | 'late' | 'absent' | 'cancelled' | 'holiday' | 'pending';
 export type Zone = 'safe' | 'warn' | 'danger' | 'building' | 'neutral';
 
-export interface Subject { id: string; name: string; color: string; active: boolean; target?: number; }  // target: optional per-subject %
+// termId: every subject belongs to one term (semester); its slots and records follow it.
+export interface Subject { id: string; name: string; color: string; active: boolean; target?: number; termId: string; }  // target: optional per-subject %
+/** A semester. Attendance, subjects, timetable and streak are kept separate per term. */
+export interface Term { id: string; name: string; start: string; end: string; }   // ISO yyyy-mm-dd, inclusive
 export interface Slot { id: string; subjectId: string; day: number; start: string; end: string; room: string; lat: number | null; lng: number | null; radius: number; active: boolean; }
-export interface Rec { id: string; slotId: string; subjectId: string; date: string; scheduledStart: string; status: Status; source?: string; }
+// plannedSubjectId: set when this one class was swapped to another subject. The planned
+// subject is frozen for that date (not held, not absent); `subjectId` is what actually ran.
+export interface Rec { id: string; slotId: string; subjectId: string; date: string; scheduledStart: string; status: Status; source?: string; plannedSubjectId?: string; }
 export type ThemePref = 'system' | 'light' | 'dark';
 export type RoundingRule = 'round' | 'floor';
 export interface Settings {
   target: number;
   countCancelled: boolean;
   themePref: ThemePref;
-  termStart?: string;         // ISO yyyy-mm-dd, optional
-  termEnd?: string;           // ISO yyyy-mm-dd, optional
+  termStart?: string;         // derived by termView() from the viewed term; not stored
+  termEnd?: string;           // derived by termView() from the viewed term; not stored
   remindersOn?: boolean;      // class-time reminders (dev build only)
   reminderLead?: number;      // minutes before class to remind (default 10)
   roundingRule?: RoundingRule; // how the % is shown (some colleges truncate 74.6 → 74)
   defaultRadius?: number;     // default check-in radius, metres (default 100)
   graceMin?: number;          // minutes after start still "on time"; later = Late (default 15)
 }
-export interface AppData { subjects: Subject[]; slots: Slot[]; records: Rec[]; settings: Settings; }
+export interface AppData {
+  subjects: Subject[]; slots: Slot[]; records: Rec[]; settings: Settings;
+  terms: Term[];
+  activeTermId: string;       // the term being viewed (this device only; not synced)
+}
 
 export const DEFAULT_SETTINGS: Settings = { target: 75, countCancelled: false, themePref: 'light', reminderLead: 10, roundingRule: 'round', defaultRadius: 100, graceMin: 15 };
 
@@ -32,11 +41,75 @@ export const subjectTarget = (data: AppData, s: Subject) => s.target ?? data.set
 let counter = 0;
 export const uid = () => `${Date.now().toString(36)}${(counter++).toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
+/* ---- terms ---- */
+export const termById = (data: AppData, id: string) => data.terms.find(t => t.id === id);
+/** The term containing this date (if any). */
+export const termForDate = (data: AppData, iso: string) => data.terms.find(t => t.start <= iso && iso <= t.end);
+/** The term running today, if any. New classes are only ever created for this term. */
+export const currentTerm = (data: AppData, today: string = TODAY) => termForDate(data, today);
+/** The most recent term by start date. */
+export const latestTerm = (data: AppData) => [...data.terms].sort((a, b) => b.start.localeCompare(a.start))[0];
+export const termSubjectIds = (data: AppData, termId: string) => new Set(data.subjects.filter(s => s.termId === termId).map(s => s.id));
+
+/** What every screen reads: only the viewed term's subjects, slots and records, with the
+    term's dates exposed as settings.termStart/termEnd. Writes still go to the full data
+    (ids are unique), so screens can keep calling setData on the whole thing. */
+export function termView(data: AppData, termId: string = data.activeTermId): AppData {
+  const t = termById(data, termId) ?? latestTerm(data);
+  if (!t) return data;
+  const ids = termSubjectIds(data, t.id);
+  return {
+    ...data,
+    activeTermId: t.id,
+    subjects: data.subjects.filter(s => ids.has(s.id)),
+    slots: data.slots.filter(s => ids.has(s.subjectId)),
+    records: data.records.filter(r => ids.has(r.subjectId)),
+    settings: { ...data.settings, termStart: t.start, termEnd: t.end },
+  };
+}
+
+/** A fresh, empty app with one term starting today. */
+export function emptyData(settings: Settings = { ...DEFAULT_SETTINGS }): AppData {
+  const term: Term = { id: 'term-' + uid(), name: 'Term 1', start: TODAY, end: addDays(TODAY, 120) };
+  return { subjects: [], slots: [], records: [], settings: { ...settings, termStart: undefined, termEnd: undefined }, terms: [term], activeTermId: term.id };
+}
+
+export function updateTerm(data: AppData, id: string, patch: Partial<Omit<Term, 'id'>>): AppData {
+  return { ...data, terms: data.terms.map(t => (t.id === id ? { ...t, ...patch } : t)) };
+}
+
+/** Start a new term (and switch to it). Optionally copy another term's subjects and
+    timetable as a starting point: new ids, same names, colours, targets, rooms and locations.
+    Attendance is never copied. */
+export function startTerm(data: AppData, t: { name: string; start: string; end: string }, copyFrom?: string): AppData {
+  const term: Term = { id: 'term-' + uid(), name: t.name.trim() || 'New term', start: t.start, end: t.end };
+  let subjects = data.subjects, slots = data.slots;
+  if (copyFrom) {
+    const map = new Map<string, string>();
+    const src = data.subjects.filter(s => s.termId === copyFrom);
+    const newSubs = src.map(s => { const id = uid(); map.set(s.id, id); return { ...s, id, termId: term.id }; });
+    const newSlots = data.slots.filter(sl => map.has(sl.subjectId)).map(sl => ({ ...sl, id: uid(), subjectId: map.get(sl.subjectId)! }));
+    subjects = [...subjects, ...newSubs];
+    slots = [...slots, ...newSlots];
+  }
+  return materializeToday({ ...data, terms: [...data.terms, term], subjects, slots, activeTermId: term.id });
+}
+
 /* ---- dates ---- */
 const pad = (n: number) => String(n).padStart(2, '0');
 export const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-export const TODAY = isoDate(new Date());
-export const TODAY_DOW = new Date().getDay();
+// Live bindings: refreshToday() moves them forward after midnight, and every importer
+// reads the new value (ES modules re-export `let` bindings live).
+export let TODAY = isoDate(new Date());
+export let TODAY_DOW = new Date().getDay();
+/** Re-read the clock. Returns true if the date changed (the app then re-renders). */
+export function refreshToday(now: Date = new Date()): boolean {
+  const t = isoDate(now);
+  if (t === TODAY) return false;
+  TODAY = t;
+  TODAY_DOW = now.getDay();
+  return true;
+}
 export const parseISO = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 export const addDays = (iso: string, n: number) => { const d = parseISO(iso); d.setDate(d.getDate() + n); return isoDate(d); };
 export const niceToday = () => parseISO(TODAY).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
@@ -105,15 +178,28 @@ export function limitingSubject(data: AppData) {
   }
   return { ...tight, budget };
 }
-export function streaks(data: AppData) {
-  const attended = (r: Rec) => r.status === 'present' || r.status === 'late';
-  const byDate: Record<string, Rec[]> = {};
-  for (const r of data.records) if (attended(r) || r.status === 'absent') (byDate[r.date] = byDate[r.date] || []).push(r);
-  const dates = Object.keys(byDate).sort();
-  let best = 0, run = 0, cur = 0;
-  for (const d of dates) { if (byDate[d].every(attended)) { run++; best = Math.max(best, run); } else run = 0; }
-  for (let i = dates.length - 1; i >= 0; i--) { if (byDate[dates[i]].every(attended)) cur++; else break; }
-  return { current: cur, best };
+type StreakMark = 'attended' | 'missed' | 'unmarked';
+export interface Streak {
+  current: number;          // classes attended in a row, ending at the most recent class
+  best: number;             // longest run ever
+  paused: number;           // > 0: the run is interrupted by this many unmarked past classes
+  pausedAt: number;         // the run length just before those unmarked classes
+}
+/** Continuous class streak, one class at a time in timetable order.
+    Present/late extends it, absent breaks it, not held / holiday are skipped (not your fault),
+    an unmarked PAST class pauses it until marked, and today's unmarked classes don't count yet. */
+export function streaks(data: AppData, todayISO: string = TODAY): Streak {
+  const seq: StreakMark[] = data.records
+    .filter(r => r.status === 'present' || r.status === 'late' || r.status === 'absent' || (r.status === 'pending' && r.date < todayISO))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.scheduledStart.localeCompare(b.scheduledStart))
+    .map(r => (r.status === 'pending' ? 'unmarked' : r.status === 'absent' ? 'missed' : 'attended'));
+  let best = 0, run = 0;
+  for (const m of seq) { if (m === 'attended') { run++; best = Math.max(best, run); } else run = 0; }
+  // Unmarked classes at the end of the sequence pause the streak instead of hiding the gap.
+  let paused = 0, pausedAt = 0;
+  for (let i = seq.length - 1; i >= 0 && seq[i] === 'unmarked'; i--) paused++;
+  for (let i = seq.length - 1 - paused; paused && i >= 0 && seq[i] === 'attended'; i--) pausedAt++;
+  return { current: run, best, paused, pausedAt };
 }
 
 /* ---- end-of-term projection ----
@@ -146,9 +232,9 @@ export function futureClassCount(data: AppData, subjectId: string | null, todayI
   return count;
 }
 
-export function project(data: AppData, subjectId: string | null, todayISO: string, termEndISO: string): Projection {
+export function project(data: AppData, subjectId: string | null, todayISO: string, termEndISO: string, target?: number): Projection {
   const { a, h } = subjectId ? countsFor(data, subjectId) : overallCounts(data);
-  const T = data.settings.target;
+  const T = target ?? data.settings.target;
   const future = futureClassCount(data, subjectId, todayISO, termEndISO);
   const H = h + future;
   const finalIfAll = H <= 0 ? currentPct(a, h) : ((a + future) / H) * 100;
@@ -164,8 +250,10 @@ export function project(data: AppData, subjectId: string | null, todayISO: strin
 
 /* ---- materialize today's classes ---- */
 export function materializeToday(data: AppData): AppData {
+  const term = currentTerm(data);
+  if (!term) return data;                       // between terms: nothing is scheduled
   const recs = [...data.records];
-  const activeSub = new Set(data.subjects.filter(s => s.active).map(s => s.id));
+  const activeSub = new Set(data.subjects.filter(s => s.active && s.termId === term.id).map(s => s.id));
   for (const sl of data.slots.filter(s => s.active && s.day === TODAY_DOW && activeSub.has(s.subjectId))) {
     if (!recs.find(r => r.slotId === sl.id && r.date === TODAY)) {
       recs.push({ id: uid(), slotId: sl.id, subjectId: sl.subjectId, date: TODAY, scheduledStart: sl.start, status: 'pending' });
@@ -176,11 +264,13 @@ export function materializeToday(data: AppData): AppData {
 
 /* ---- end-of-day review: backfill past class-days so nothing is silently missed ---- */
 export function materializePast(data: AppData): AppData {
+  const term = currentTerm(data);
+  if (!term) return data;
   const recs = [...data.records];
-  const activeSub = new Set(data.subjects.filter(s => s.active).map(s => s.id));
-  // window: from term start (if set & not ancient) else the last 21 days, up to yesterday
+  const activeSub = new Set(data.subjects.filter(s => s.active && s.termId === term.id).map(s => s.id));
+  // window: from term start (if not ancient) else the last 21 days, up to yesterday
   const floor = addDays(TODAY, -60);
-  const start = data.settings.termStart && data.settings.termStart > floor ? data.settings.termStart : addDays(TODAY, -21);
+  const start = term.start > floor ? term.start : addDays(TODAY, -21);
   const have = new Set(recs.map(r => r.slotId + '|' + r.date));
   let d = start;
   while (d < TODAY) {
@@ -201,6 +291,76 @@ export function unmarkedPast(data: AppData): Rec[] {
     .sort((a, b) => b.date.localeCompare(a.date) || a.scheduledStart.localeCompare(b.scheduledStart));
 }
 
+/* ---- one date: calendar day sheet ---- */
+const attendedStatus = (s: Status) => s === 'present' || s === 'late';
+
+/** Records for one date, sorted by start time. */
+export const recordsOn = (data: AppData, iso: string) =>
+  data.records.filter(r => r.date === iso).sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart));
+
+/** Active timetable slots that fall on this date's weekday (the "planned" day). */
+export function plannedSlotsOn(data: AppData, iso: string): Slot[] {
+  const term = termForDate(data, iso);
+  if (!term) return [];
+  const dow = parseISO(iso).getDay();
+  const activeSub = new Set(data.subjects.filter(s => s.active && s.termId === term.id).map(s => s.id));
+  return data.slots.filter(s => s.active && s.day === dow && activeSub.has(s.subjectId)).sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** Create pending records for a past/today date that has timetable classes but no records yet.
+    Only runs when the student opens that day, so it never invents catch-up items on its own. */
+export function ensureDayRecords(data: AppData, iso: string, todayISO: string = TODAY): AppData {
+  if (iso > todayISO) return data;
+  const have = new Set(data.records.filter(r => r.date === iso).map(r => r.slotId));
+  const add: Rec[] = plannedSlotsOn(data, iso)
+    .filter(sl => !have.has(sl.id))
+    .map(sl => ({ id: uid(), slotId: sl.id, subjectId: sl.subjectId, date: iso, scheduledStart: sl.start, status: 'pending' as Status }));
+  return add.length ? { ...data, records: [...data.records, ...add] } : data;
+}
+
+export function setRecordStatus(data: AppData, recId: string, status: Status): AppData {
+  return { ...data, records: data.records.map(r => (r.id === recId ? { ...r, status, source: 'manual' } : r)) };
+}
+
+/** Every class on this date becomes a holiday (doesn't count either way). */
+export function markDayHoliday(data: AppData, iso: string): AppData {
+  return { ...data, records: data.records.map(r => (r.date === iso ? { ...r, status: 'holiday' as Status, source: 'manual' } : r)) };
+}
+
+/** Swap ONE class to another subject (e.g. Maths slot, but BEEE was taught).
+    The planned subject is frozen for that date: no record for it, so it is neither held nor absent.
+    Status resets to pending because the old mark belonged to the other subject.
+    Choosing the planned subject again restores the class. */
+export function changeRecSubject(data: AppData, recId: string, newSubjectId: string): AppData {
+  return {
+    ...data,
+    records: data.records.map(r => {
+      if (r.id !== recId) return r;
+      const planned = r.plannedSubjectId ?? r.subjectId;
+      if (newSubjectId === r.subjectId) return r;
+      if (newSubjectId === planned) { const { plannedSubjectId: _p, ...rest } = r; return { ...rest, subjectId: planned, status: 'pending' as Status, source: 'manual' }; }
+      return { ...r, subjectId: newSubjectId, plannedSubjectId: planned, status: 'pending' as Status, source: 'manual' };
+    }),
+  };
+}
+
+/** A class that isn't in the timetable (extra lecture, makeup class). */
+export function addExtraClass(data: AppData, iso: string, subjectId: string, start: string, status: Status): AppData {
+  const rec: Rec = { id: uid(), slotId: 'extra-' + uid(), subjectId, date: iso, scheduledStart: start, status, source: 'extra' };
+  return { ...data, records: [...data.records, rec] };
+}
+
+export type DayKind = 'present' | 'absent' | 'partial' | 'off' | 'pending' | 'none';
+/** How a calendar day is coloured. Late counts as attended. */
+export function dayKind(recs: Rec[]): DayKind {
+  if (recs.length === 0) return 'none';
+  const att = recs.filter(r => attendedStatus(r.status)).length;
+  const abs = recs.filter(r => r.status === 'absent').length;
+  if (att + abs === 0) return recs.some(r => r.status === 'pending') ? 'pending' : 'off';
+  if (abs === 0) return recs.some(r => r.status === 'pending') ? 'partial' : 'present';
+  return att === 0 && !recs.some(r => r.status === 'pending') ? 'absent' : 'partial';
+}
+
 /* ---- sample data ---- */
 export function seedSample(): AppData {
   const defs = [
@@ -210,7 +370,8 @@ export function seedSample(): AppData {
     { name: 'English', color: SUBJECT_COLORS[4], p: 0.86 },
     { name: 'Data Structures', color: SUBJECT_COLORS[0], p: 0.90 },
   ];
-  const subjects: Subject[] = defs.map(d => ({ id: uid(), name: d.name, color: d.color, active: true }));
+  const term: Term = { id: 'term-' + uid(), name: 'Term 1', start: addDays(TODAY, -28), end: addDays(TODAY, 92) };
+  const subjects: Subject[] = defs.map(d => ({ id: uid(), name: d.name, color: d.color, active: true, termId: term.id }));
   const byName = (n: string) => subjects.find(s => s.name === n)!;
   const template: Record<number, [string, string, string, string][]> = {
     1: [['Physics', '10:00', '10:55', 'Room 204'], ['Mathematics', '12:00', '12:55', 'Room 110'], ['Data Structures', '14:00', '15:30', 'Lab 3']],
@@ -233,5 +394,5 @@ export function seedSample(): AppData {
       records.push({ id: uid(), slotId: sl.id, subjectId: sl.subjectId, date, scheduledStart: sl.start, status: Math.random() < prob ? 'present' : 'absent', source: 'seed' });
     }
   }
-  return materializeToday({ subjects, slots, records, settings: { ...DEFAULT_SETTINGS } });
+  return materializeToday({ subjects, slots, records, settings: { ...DEFAULT_SETTINGS }, terms: [term], activeTermId: term.id });
 }

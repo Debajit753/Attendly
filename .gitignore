@@ -45,3 +45,9 @@ PROGRESS.md
 # generated native folders (expo prebuild output lives inside app/)
 /app/ios
 /app/android
+
+# Firebase CLI / emulator output
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
